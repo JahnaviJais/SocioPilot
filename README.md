@@ -86,8 +86,8 @@ SocioPilot/
 
 1. Clone this repository:
     ```bash
-    git clone https://github.com/JahnaviJais/SocioPilot---Social-Media-Content-Analyzer.git
-    cd SocioPilot---Social-Media-Content-Analyzer
+    git clone https://github.com/JahnaviJais/SocioPilot.git
+    cd SocioPilot
     ```
 2. Set Up the Backend
     ```bash
