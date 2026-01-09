@@ -16,6 +16,11 @@ require('dotenv').config();
 
 const app = express();
 
+app.use(cors({
+  origin: "https://sociopilott.vercel.app/",
+  credentials: true
+}));
+
 // Middleware
 app.use(cors());
 app.use(express.json());
