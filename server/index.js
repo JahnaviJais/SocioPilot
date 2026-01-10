@@ -1,10 +1,12 @@
-// server.js - Complete Backend with Your Working Gemini Implementation + Auth
+// server.js - Production Ready Version
 
 const express = require('express');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const multer = require('multer');
 const pdfParse = require('pdf-parse');
 const Tesseract = require('tesseract.js');
@@ -16,17 +18,33 @@ require('dotenv').config();
 
 const app = express();
 
+// Trust proxy for production platforms
+app.set('trust proxy', 1);
+
+// Security middleware
+app.use(helmet());
+
+// CORS Configuration - Production ready
 app.use(cors({
-  origin: "https://sociopilott.vercel.app/",
-  credentials: true
+  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Middleware
-app.use(cors());
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: 'Too many requests, please try again later.'
+});
+app.use('/api/', limiter);
+
+// Body parsing middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Initialize Gemini AI (Your working version)
+// Initialize Gemini AI
 const gemini = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
 });
@@ -34,15 +52,18 @@ const gemini = new GoogleGenAI({
 // Initialize Sentiment
 const sentiment = new Sentiment();
 
-// MongoDB Connection
+// MongoDB Connection with error handling
 mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
-  useUnifiedTopology: true
+  useUnifiedTopology: true,
 })
 .then(() => console.log('✅ MongoDB Connected'))
-.catch(err => console.error('❌ MongoDB Connection Error:', err));
+.catch(err => {
+  console.error('❌ MongoDB Connection Error:', err);
+  process.exit(1);
+});
 
-// Multer Configuration for File Upload
+// Multer Configuration
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadDir = './uploads';
@@ -53,7 +74,7 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname);
-    cb(null, Date.now() + ext);
+    cb(null, Date.now() + '-' + Math.random().toString(36).substring(7) + ext);
   }
 });
 
@@ -70,14 +91,13 @@ const upload = multer({
   }
 });
 
-// Check if uploads folder exists
+// Ensure uploads folder exists
 if (!fs.existsSync('uploads')) {
   fs.mkdirSync('uploads');
 }
 
 // ===================== SCHEMAS =====================
 
-// User Schema
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true, lowercase: true },
@@ -87,7 +107,6 @@ const userSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', userSchema);
 
-// Insight Schema
 const insightSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   fileName: { type: String, required: true },
@@ -110,7 +129,6 @@ const Insight = mongoose.model('Insight', insightSchema);
 
 // ===================== MIDDLEWARE =====================
 
-// Authentication Middleware
 const authMiddleware = async (req, res, next) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
@@ -129,12 +147,10 @@ const authMiddleware = async (req, res, next) => {
 
 // ===================== AUTH ROUTES =====================
 
-// Signup Route
 app.post('/api/auth/signup', async (req, res) => {
   try {
     const { name, email, password } = req.body;
     
-    // Validation
     if (!name || !email || !password) {
       return res.status(400).json({ error: 'All fields are required' });
     }
@@ -143,16 +159,13 @@ app.post('/api/auth/signup', async (req, res) => {
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
     
-    // Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ error: 'Email already registered' });
     }
     
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
     
-    // Create user
     const user = new User({
       name,
       email,
@@ -161,7 +174,6 @@ app.post('/api/auth/signup', async (req, res) => {
     
     await user.save();
     
-    // Generate JWT token
     const token = jwt.sign(
       { userId: user._id },
       process.env.JWT_SECRET,
@@ -182,29 +194,24 @@ app.post('/api/auth/signup', async (req, res) => {
   }
 });
 
-// Login Route
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     
-    // Validation
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
     }
     
-    // Find user
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
     
-    // Check password
     const isValidPassword = await bcrypt.compare(password, user.password);
     if (!isValidPassword) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
     
-    // Generate JWT token
     const token = jwt.sign(
       { userId: user._id },
       process.env.JWT_SECRET,
@@ -227,7 +234,6 @@ app.post('/api/auth/login', async (req, res) => {
 
 // ===================== ANALYSIS ROUTES =====================
 
-// Analyze Content Route (Your working implementation with auth)
 app.post('/api/analyze', authMiddleware, upload.single('file'), async (req, res) => {
   let filePath = null;
   
@@ -239,17 +245,12 @@ app.post('/api/analyze', authMiddleware, upload.single('file'), async (req, res)
     filePath = req.file.path;
     let text = '';
 
-    // Extract text from PDF
     if (req.file.mimetype === 'application/pdf') {
       const dataBuffer = fs.readFileSync(filePath);
       const data = await pdfParse(dataBuffer);
       text = data.text;
-    }
-    // Extract text from images
-    else if (req.file.mimetype.startsWith('image/')) {
-      const result = await Tesseract.recognize(filePath, 'eng', {
-        logger: (m) => console.log(m),
-      });
+    } else if (req.file.mimetype.startsWith('image/')) {
+      const result = await Tesseract.recognize(filePath, 'eng');
       text = result.data.text;
     } else {
       return res.status(400).json({ error: 'Unsupported file type' });
@@ -259,10 +260,8 @@ app.post('/api/analyze', authMiddleware, upload.single('file'), async (req, res)
       throw new Error('No text could be extracted from the file');
     }
 
-    // Calculate sentiment score
     const sentimentResult = sentiment.analyze(text);
     
-    // Compute engagement metrics
     const metrics = {
       hashtagCount: (text.match(/#/g) || []).length,
       lengthCount: text.length,
@@ -276,51 +275,41 @@ app.post('/api/analyze', authMiddleware, upload.single('file'), async (req, res)
 
     try {
       const input = text.slice(0, 2000);
+      
+      if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'your-gemini-api-key-here') {
+        throw new Error('Gemini API key not configured');
+      }
+      
+      const insightPrompt = `You are a social media expert. Analyze the following post in about 150 words, focusing on strengths. Keep it concise and actionable without bullet points.\n\nPost: ${input}`;
 
-      // Your working prompts
-      const [insightRes, suggestionsRes] = await Promise.all([
-        gemini.models.generateContent({
-          model: 'gemini-2.0-flash-exp',
-          contents: `
-          You are a social media expert. Analyze the following post.
-          First, provide your analysis in about 150 words, focusing on the strengths of the post.
+      const suggestionsPrompt = `You are a social media expert. Provide 3-5 specific improvements as a numbered list only. Each with bold heading and explanation.\n\nPost: ${input}`;
 
-          Important:
-          - Keep it concise and actionable.
-          - Do not include bullet points or numbered lists.
-          - Focus only on the analysis.
-
-          Post:
-          ${input}
-          `,
-        }),
-        gemini.models.generateContent({
-          model: 'gemini-2.0-flash-exp',
-          contents: `
-          You are a social media expert. Analyze the following post and provide 3-5 specific improvements to increase engagement.
-
-          Focus on clarity, hashtags, call-to-action, tone, formatting, etc.
-
-          Important:
-          - Give improvements ONLY as a clean numbered list (1., 2., 3., etc).
-          - Do not write any introductory text like "Here are improvements".
-          - Each improvement should have a short heading in bold (**...**) followed by a clear explanation.
-
-          Post:
-          ${input}
-          `,
-        }),
-      ]);
+      const models = ['gemini-2.0-flash-exp', 'gemini-1.5-flash', 'gemini-pro'];
+      let insightRes, suggestionsRes;
+      
+      for (const model of models) {
+        try {
+          [insightRes, suggestionsRes] = await Promise.all([
+            gemini.models.generateContent({ model, contents: insightPrompt }),
+            gemini.models.generateContent({ model, contents: suggestionsPrompt }),
+          ]);
+          break;
+        } catch (modelError) {
+          if (model === models[models.length - 1]) throw modelError;
+        }
+      }
 
       aiInsight = insightRes.text?.trim() || 'No insight generated.';
       aiSuggestions = suggestionsRes.text?.trim() || 'No suggestions generated.';
+
     } catch (aiError) {
-      console.error('Gemini AI error:', aiError);
-      aiInsight = 'Could not generate insight at this time.';
-      aiSuggestions = 'Could not generate suggestions at this time.';
+      console.error('Gemini AI error:', aiError.message);
+      
+      aiInsight = `This post contains ${text.length} characters with ${metrics.hashtagCount} hashtags and ${metrics.mentionCount} mentions. Sentiment score: ${metrics.sentimentScore}. The AI analysis service is temporarily unavailable.`;
+      
+      aiSuggestions = `1. **Optimize hashtags**: ${metrics.hashtagCount === 0 ? 'Add relevant hashtags to increase discoverability.' : 'Review hashtags for better reach.'}\n\n2. **Engagement**: ${metrics.mentionCount === 0 ? 'Consider tagging relevant accounts.' : 'Good use of mentions!'}\n\n3. **Call-to-action**: Add a clear call-to-action.\n\n4. **Content length**: ${text.length < 100 ? 'Consider expanding content.' : 'Good length!'}\n\n5. **Tone**: ${metrics.sentimentScore > 0 ? 'Positive tone - great!' : metrics.sentimentScore < 0 ? 'Consider more positive language.' : 'Add emotion for better connection.'}`;
     }
 
-    // Save to database
     const insight = new Insight({
       userId: req.userId,
       fileName: req.file.originalname,
@@ -332,7 +321,6 @@ app.post('/api/analyze', authMiddleware, upload.single('file'), async (req, res)
     
     await insight.save();
 
-    // Send response
     res.json({
       extractedText: text,
       postInsights: aiInsight,
@@ -341,13 +329,13 @@ app.post('/api/analyze', authMiddleware, upload.single('file'), async (req, res)
       insightId: insight._id
     });
 
-    // Clean up uploaded file
-    fs.unlinkSync(filePath);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
     
   } catch (error) {
     console.error('Analysis Error:', error);
     
-    // Clean up file if exists
     if (filePath && fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
@@ -358,13 +346,12 @@ app.post('/api/analyze', authMiddleware, upload.single('file'), async (req, res)
   }
 });
 
-// Get User's Insights
 app.get('/api/insights', authMiddleware, async (req, res) => {
   try {
     const insights = await Insight.find({ userId: req.userId })
       .sort({ createdAt: -1 })
       .limit(50)
-      .select('-extractedText'); // Exclude large text for list view
+      .select('-extractedText');
     
     res.json(insights);
   } catch (error) {
@@ -373,7 +360,6 @@ app.get('/api/insights', authMiddleware, async (req, res) => {
   }
 });
 
-// Get Single Insight
 app.get('/api/insights/:id', authMiddleware, async (req, res) => {
   try {
     const insight = await Insight.findOne({
@@ -392,7 +378,6 @@ app.get('/api/insights/:id', authMiddleware, async (req, res) => {
   }
 });
 
-// Delete Insight
 app.delete('/api/insights/:id', authMiddleware, async (req, res) => {
   try {
     const result = await Insight.findOneAndDelete({
@@ -411,16 +396,22 @@ app.delete('/api/insights/:id', authMiddleware, async (req, res) => {
   }
 });
 
-// Health Check Route
+// Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Server is running' });
+  res.json({ 
+    status: 'OK', 
+    message: 'Server is running',
+    environment: process.env.NODE_ENV || 'development'
+  });
 });
 
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Server Error:', err);
   res.status(500).json({ 
-    error: err.message || 'Internal server error' 
+    error: process.env.NODE_ENV === 'production' 
+      ? 'Internal server error' 
+      : err.message 
   });
 });
 
@@ -431,7 +422,6 @@ app.listen(PORT, () => {
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
-// Handle unhandled promise rejections
 process.on('unhandledRejection', (err) => {
   console.error('Unhandled Rejection:', err);
 });
