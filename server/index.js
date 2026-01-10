@@ -53,10 +53,7 @@ const gemini = new GoogleGenAI({
 const sentiment = new Sentiment();
 
 // MongoDB Connection with error handling
-mongoose.connect(process.env.MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
+mongoose.connect(process.env.MONGODB_URI)
 .then(() => console.log('✅ MongoDB Connected'))
 .catch(err => {
   console.error('❌ MongoDB Connection Error:', err);
