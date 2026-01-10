@@ -2,6 +2,9 @@ import { useState, useEffect } from "react";
 import { Upload, LogOut, User, TrendingUp, Zap, Shield, Menu, X } from "lucide-react";
 import ResultCard from "./components/ResultCard";
 
+// FIXED: Use environment variable with fallback
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
 function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [showAuth, setShowAuth] = useState(false);
@@ -48,7 +51,6 @@ function App() {
 
   const loadUserInsights = async () => {
     try {
-      const API_URL = 'http://localhost:5000';
       const token = localStorage.getItem('sociopilot_token');
       
       if (!token) {
@@ -93,10 +95,9 @@ function App() {
     }
 
     try {
-      const API_URL = 'http://localhost:5000';
       const endpoint = isLogin ? '/api/auth/login' : '/api/auth/signup';
       
-      // Prepare payload - only send name for signup
+      // Prepare payload
       const payload = isLogin 
         ? { email: authForm.email, password: authForm.password }
         : { name: authForm.name, email: authForm.email, password: authForm.password };
@@ -105,7 +106,9 @@ function App() {
       
       const response = await fetch(`${API_URL}${endpoint}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify(payload)
       });
       
@@ -125,7 +128,7 @@ function App() {
       localStorage.setItem("sociopilot_user", JSON.stringify(data.user));
       
       setCurrentUser(data.user);
-      setSavedInsights([]); // Reset insights
+      setSavedInsights([]);
       setShowAuth(false);
       setAuthForm({ name: "", email: "", password: "" });
       
@@ -133,7 +136,13 @@ function App() {
       setTimeout(() => loadUserInsights(), 100);
     } catch (err) {
       console.error('Auth error:', err);
-      setError(err.message || 'Authentication failed. Please try again.');
+      
+      // Enhanced error messages
+      if (err.message.includes('Failed to fetch')) {
+        setError('Cannot connect to server. Please ensure the backend is running on port 5000.');
+      } else {
+        setError(err.message || 'Authentication failed. Please try again.');
+      }
     }
   };
 
@@ -171,7 +180,6 @@ function App() {
     setLoading(true);
 
     try {
-      const API_URL = 'http://localhost:5000';
       const token = localStorage.getItem('sociopilot_token');
       
       const formData = new FormData();
@@ -196,7 +204,13 @@ function App() {
       // Refresh insights list
       await loadUserInsights();
     } catch (err) {
-      setError(err.message || 'Analysis failed. Please try again.');
+      console.error('Analysis error:', err);
+      
+      if (err.message.includes('Failed to fetch')) {
+        setError('Cannot connect to server. Please ensure the backend is running.');
+      } else {
+        setError(err.message || 'Analysis failed. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -310,7 +324,10 @@ function App() {
           <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-gray-800 rounded-2xl p-8 max-w-md w-full border border-gray-700 relative">
               <button
-                onClick={() => setShowAuth(false)}
+                onClick={() => {
+                  setShowAuth(false);
+                  setError("");
+                }}
                 className="absolute top-4 right-4 text-gray-400 hover:text-white"
               >
                 <X className="w-6 h-6" />
@@ -320,7 +337,7 @@ function App() {
                 {isLogin ? "Welcome Back" : "Join SocioPilot"}
               </h2>
               
-              <div className="space-y-4">
+              <form onSubmit={handleAuth} className="space-y-4">
                 {!isLogin && (
                   <div>
                     <label className="block text-sm font-medium mb-2">Name</label>
@@ -363,17 +380,20 @@ function App() {
                 )}
                 
                 <button
-                  onClick={handleAuth}
+                  type="submit"
                   className="w-full py-3 bg-gradient-to-r from-purple-500 to-pink-500 rounded-lg font-semibold hover:shadow-lg hover:shadow-purple-500/50 transition-all"
                 >
                   {isLogin ? "Sign In" : "Create Account"}
                 </button>
-              </div>
+              </form>
               
               <p className="text-center mt-6 text-gray-400">
                 {isLogin ? "Don't have an account? " : "Already have an account? "}
                 <button
-                  onClick={() => setIsLogin(!isLogin)}
+                  onClick={() => {
+                    setIsLogin(!isLogin);
+                    setError("");
+                  }}
                   className="text-purple-400 hover:text-purple-300 font-semibold"
                 >
                   {isLogin ? "Sign Up" : "Sign In"}
